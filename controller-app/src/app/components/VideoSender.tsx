@@ -4,175 +4,73 @@ import { useRef, useEffect, useState } from "react";
 import {WEB_SOCKET_URL, ROOM} from '@/constants'
 export const VideoSender: React.FC<{}> = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>("new");
   const [wsConnected, setWsConnected] = useState(false);
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
-    let ws: WebSocket | null = null;
-    let peerConnection: RTCPeerConnection | null = null;
-    const pendingIceCandidates: RTCIceCandidate[] = [];
-
-    const init = async () => {
-      try {
-        // 1. 获取摄像头流（先获取，避免权限提示延迟）
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: false,
-        });
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setIsStreaming(true);
-          setError(null);
-        }
-
-        // 2. 创建 PeerConnection
-        peerConnection = new RTCPeerConnection({
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
-        });
-        peerConnectionRef.current = peerConnection;
-
-        // 添加视频轨道
-        stream.getTracks().forEach((track) => {
-          peerConnection!.addTrack(track, stream!);
-          console.log("Sender: Added track:", track.kind);
-        });
-
-        // 监听连接状态
-        peerConnection.onconnectionstatechange = () => {
-          console.log("Sender connection state:", peerConnection!.connectionState);
-          setConnectionState(peerConnection!.connectionState);
-        };
-
-        peerConnection.oniceconnectionstatechange = () => {
-          console.log("Sender ICE connection state:", peerConnection!.iceConnectionState);
-        };
-
-        // 监听 ICE candidates
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate && ws?.readyState === WebSocket.OPEN) {
-            console.log("Sender: Sending ICE candidate", event.candidate.type);
-            ws.send(JSON.stringify({
-              ROOM,
-              type: "ice-candidate",
-              payload: {
-                candidate: event.candidate,
-                from: "sender"
-              }
-            }));
-          } else if (!event.candidate) {
-            console.log("Sender: ICE gathering complete");
-          }
-        };
-
-        // 3. 连接到信令服务器
-        ws = new WebSocket(WEB_SOCKET_URL);
-        wsRef.current = ws;
-
-        // 监听来自信令服务器的消息（在 onopen 之前设置）
-        ws.onmessage = async (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log("Sender: Received message:", message.type);
-
-            switch (message.type) {
-              case "answer":
-                if (peerConnection!.signalingState !== "stable") {
-                  await peerConnection!.setRemoteDescription(message.payload);
-                  console.log("Sender: Set remote description (answer)");
-
-                  // 处理之前缓存的 ICE candidates
-                  for (const candidate of pendingIceCandidates) {
-                    await peerConnection!.addIceCandidate(candidate);
-                    console.log("Sender: Added pending ICE candidate");
-                  }
-                  pendingIceCandidates.length = 0;
-                }
-                break;
-
-              case "ice-candidate":
-                if (message.payload.from === "receiver") {
-                  if (peerConnection!.remoteDescription) {
-                    await peerConnection!.addIceCandidate(message.payload.candidate);
-                    console.log("Sender: Added ICE candidate from receiver");
-                  } else {
-                    // 缓存 ICE candidate，等待 remoteDescription 设置后再添加
-                    pendingIceCandidates.push(message.payload.candidate);
-                    console.log("Sender: Cached ICE candidate (waiting for remote description)");
-                  }
-                }
-                break;
-            }
-          } catch (error) {
-            console.error("Sender: Error handling message:", error);
-          }
-        };
-
-        ws.onopen = async () => {
-          console.log("Sender: Connected to signaling server");
-          setWsConnected(true);
-
-          // 加入房间
-          ws!.send(JSON.stringify({
-            ROOM,
-            type: "join",
-            payload: { role: "sender" }
-          }));
-
-          // 等待一小段时间，确保接收端也已连接
-          // await new Promise(resolve => setTimeout(resolve, 500));
-
-          // 创建并发送 offer
-          const offer = await peerConnection!.createOffer();
-          await peerConnection!.setLocalDescription(offer);
-          console.log("Sender: Created offer, sending to signaling server");
-
-          ws!.send(JSON.stringify({
-            ROOM,
-            type: "offer",
-            payload: offer
-          }));
-        };
-
-        ws.onerror = (error) => {
-          console.error("Sender: WebSocket error:", error);
-          setError("信令服务器连接失败");
-        };
-
-        ws.onclose = () => {
-          console.log("Sender: Disconnected from signaling server");
-          setWsConnected(false);
-        };
-
-      } catch (err) {
-        setError("无法访问摄像头，请确保已授予权限");
-        console.error("Sender initialization error:", err);
-      }
-    };
-
-    init();
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        console.log("Sender: PeerConnection closed");
-      }
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    };
+    const ws = new WebSocket(WEB_SOCKET_URL);
+    setWs(ws);
+    ws.addEventListener('open', () => {
+      setWsConnected(true);
+    });
   }, []);
+
+  useEffect(() => {
+    if (ws) {
+      const PC = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      setPeerConnection(PC);
+      PC.addEventListener("connectionstatechange", () => {
+        setConnectionState(PC.connectionState);
+      });
+      PC.addEventListener('icecandidate', event => {
+        ws.send(JSON.stringify({
+          room: ROOM,
+          type: 'ice-candidate',
+          payload: event.candidate
+        }));
+      });
+
+      ws.addEventListener('message', message => {
+        const data = JSON.parse(message.data);
+        switch(data.type) {
+          case 'answer':
+            if (PC.signalingState !== 'stable') {
+              PC!.setRemoteDescription(data.payload);
+            }
+            break;
+          case 'ice-candidate':
+            PC!.addIceCandidate(data.payload);
+            break;
+        }
+      })
+    }
+  }, [ws]);
+
+  useEffect(() => {
+    if(peerConnection && ws) {
+      (async () => {
+        const videoDom = videoRef.current!;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        videoDom.srcObject = stream;
+        setIsStreaming(true);
+        stream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, stream);
+        });
+
+        // 添加track后再创建offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        ws.send(JSON.stringify({room: ROOM, type: 'offer', payload: offer}));
+      })();
+    }
+  }, [peerConnection, ws]);
 
   return (
     <div className="flex flex-col gap-4">
