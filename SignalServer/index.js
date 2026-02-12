@@ -8,10 +8,10 @@ const rooms = new Map();
 
 wss.on("connection", (ws) => {
   ws.on("message", (msg) => {
-    console.log('[dev] message received:', msg);
     const data = JSON.parse(msg);
 
     const { room, type, payload } = data;
+    console.log('[dev] message received:', data);
 
     if (!rooms.has(room)) rooms.set(room, new Set());
     rooms.get(room).add(ws);
