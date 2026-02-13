@@ -1,18 +1,19 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import { io, Socket } from "socket.io-client";
 import {WEB_SOCKET_URL, ROOM} from '@/constants';
 
 export const VideoReceiver: React.FC<{}> = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [hasStream, setHasStream] = useState(false);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>("new");
-  const [wsConnected, setWsConnected] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   useEffect(() => {
-    if (ws) {
+    if (socket) {
       const PC = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
@@ -22,26 +23,26 @@ export const VideoReceiver: React.FC<{}> = () => {
         setConnectionState(PC.connectionState);
       });
       PC.addEventListener('icecandidate', event => {
-        ws.send(JSON.stringify({
+        socket.emit('message', {
           room: ROOM,
           type: 'ice-candidate',
           payload: event.candidate
-        }));
+        });
       });
 
-      ws.addEventListener('message', message => {
-        console.log("Receiver: Message from WS", message);
-        const data = JSON.parse(message.data);
+      socket.on('message', (_data) => {
+        const data = JSON.parse(_data);
+        console.log("Receiver: Message from WS", data);
         switch(data.type) {
           case 'offer':
             PC!.setRemoteDescription(data.payload).then(async () => {
               const answer = await PC!.createAnswer();
               await PC!.setLocalDescription(answer);
-              ws.send(JSON.stringify({
+              socket.emit('message', {
                 room: ROOM,
                 type: 'answer',
                 payload: answer
-              }));
+              });
             });
             break;
           case 'ice-candidate':
@@ -50,7 +51,7 @@ export const VideoReceiver: React.FC<{}> = () => {
         }
       })
     }
-  }, [ws]);
+  }, [socket]);
 
   useEffect(() => {
     if(peerConnection) {
@@ -76,8 +77,8 @@ export const VideoReceiver: React.FC<{}> = () => {
       <div className="relative w-full max-w-md">
         <div className="absolute top-2 left-2 bg-green-600 text-white px-3 py-1 rounded-full text-sm font-medium z-10 flex items-center gap-2">
           <span>接收端</span>
-          {wsConnected && (
-            <span className="text-xs bg-green-500 px-2 py-0.5 rounded-full">WS ✓</span>
+          {socketConnected && (
+            <span className="text-xs bg-green-500 px-2 py-0.5 rounded-full">Socket ✓</span>
           )}
         </div>
         <video
@@ -117,21 +118,22 @@ export const VideoReceiver: React.FC<{}> = () => {
         <button
           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           onClick={() => {
-            if (ws) return;
-            const _ws = new WebSocket(WEB_SOCKET_URL);
-            setWs(_ws);
-            _ws.addEventListener('open', () => {
-              setWsConnected(true);
+            if (socket) return;
+            // const newSocket = io(WEB_SOCKET_URL);
+            const newSocket = io("ws://localhost:8081");
+            setSocket(newSocket);
+            newSocket.on('connect', () => {
+              setSocketConnected(true);
               // 注册加入房间
-              _ws!.send(JSON.stringify({
+              newSocket.emit('message', {
                   room: ROOM,
                   type: "join",
                   payload: { role: "receiver" }
-              }));
+              });
             });
           }}
         >
-          {ws?.OPEN ? '已连接' : '未连接'}
+          {socketConnected ? '已连接' : '未连接'}
         </button>
       </div>
     </div>
