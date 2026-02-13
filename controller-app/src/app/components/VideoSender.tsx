@@ -12,14 +12,6 @@ export const VideoSender: React.FC<{}> = () => {
   const [wsConnected, setWsConnected] = useState(false);
 
   useEffect(() => {
-    const ws = new WebSocket(WEB_SOCKET_URL);
-    setWs(ws);
-    ws.addEventListener('open', () => {
-      setWsConnected(true);
-    });
-  }, []);
-
-  useEffect(() => {
     if (ws) {
       const PC = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -99,25 +91,41 @@ export const VideoSender: React.FC<{}> = () => {
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        <div
-          className={`w-3 h-3 rounded-full ${
-            connectionState === "connected"
-              ? "bg-green-500"
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div
+            className={`w-3 h-3 rounded-full ${
+              connectionState === "connected"
+                ? "bg-green-500"
+                : connectionState === "connecting"
+                ? "bg-yellow-500"
+                : "bg-zinc-500"
+            }`}
+          />
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">
+            {connectionState === "connected"
+              ? "已连接"
               : connectionState === "connecting"
-              ? "bg-yellow-500"
-              : "bg-zinc-500"
-          }`}
-        />
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">
-          {connectionState === "connected"
-            ? "已连接"
-            : connectionState === "connecting"
-            ? "连接中"
-            : isStreaming
-            ? "准备就绪"
-            : "未连接"}
-        </span>
+              ? "连接中"
+              : isStreaming
+              ? "准备就绪"
+              : "未连接"}
+          </span>
+        </div>
+        <button
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          onClick={() => {
+              if (ws) return;
+              const _ws = new WebSocket(WEB_SOCKET_URL);
+              setWs(_ws);
+              _ws.addEventListener('open', () => {
+                setWsConnected(true);
+              });
+            }
+          }
+        >
+          {ws?.OPEN ? '已连接' : '未连接'}
+        </button>
       </div>
     </div>
   );
